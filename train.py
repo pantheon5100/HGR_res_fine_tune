@@ -99,7 +99,13 @@ def train(model, optimizer, **data_loader):
              '========================='
              '5-20:'
              '1. Every 5 epoch output. '
-             '2. Add Learning Rate line. ')
+             '2. Add Learning Rate line. '
+             '3. Regain step to 20'
+             '4. FLR/CLR = 0.001')
+    vis.text('Hyper-parameters:'
+             '1. Learning rate decay multiple policy with step 20  LearningRate * (1 - epoch / N_epoch) ** power. '
+             '2. Epoch 100. ' 
+             '3. Feature LR / Classifier LR = 0.001')
     len_dataset = data_loader.get('dataloader_src').dataset.tensors[0].size()[0]
 
     for epoch in range(1, N_EPOCH + 1):
@@ -138,13 +144,15 @@ def train(model, optimizer, **data_loader):
 
         train_loss = np.mean(train_loss)
 
-        acc_src, acc_m1 = test(model, data_loader.get('dataloader_tar'), epoch, data_loader.get('datafram_2'))
-        acc_ylt, acc_m2 = test(model, data_loader.get('dataloader_ylt'), epoch, data_loader.get('datafram_3'))
+        if epoch % 5 == 0 :
+
+            acc_src, acc_m1 = test(model, data_loader.get('dataloader_tar'), epoch, data_loader.get('datafram_2'))
+            acc_ylt, acc_m2 = test(model, data_loader.get('dataloader_ylt'), epoch, data_loader.get('datafram_3'))
 
 
-        vis.line(X=[epoch], Y=[acc_src], win='acc src', opts={'title': 'acc src'}, update='append')
+            vis.line(X=[epoch], Y=[acc_src], win='acc src', opts={'title': 'acc src'}, update='append')
+            vis.line(X=[epoch], Y=[acc_ylt], win='acc ylt', opts={'title': 'acc ylt'}, update='append')
         vis.line(X=[epoch], Y=[train_loss], win='train_loss', opts={'title': 'train_loss'}, update='append')
-        vis.line(X=[epoch], Y=[acc_ylt], win='acc ylt', opts={'title': 'acc ylt'}, update='append')
         # vis.line(X=[epoch], Y=[acc_m1.reshape(6, 1)], win='acc gesture', opts={'title': 'acc gesture'}, update='append')
         # vis.line(X=[epoch], Y=[acc_m2.reshape(6, 1)], win='acc ylt gesture', opts={'title': 'acc ylt gesture'}, update='append')
 
@@ -229,6 +237,6 @@ if __name__ == '__main__':
     # optimizer = torch.optim.Adam(model_dann.parameters(), lr=LEARNING_RATE)
     # optimizer = torch.optim.RMSprop(model.parameters(), LEARNING_RATE)
     optimizer = torch.optim.SGD([
-            {'params': model.feature.parameters(), 'lr': LEARNING_RATE / 100},
+            {'params': model.feature.parameters(), 'lr': LEARNING_RATE / 1000},
         ], lr=LEARNING_RATE, momentum=0.9, weight_decay=DECAY)
     train(model, optimizer, **data_loader)
