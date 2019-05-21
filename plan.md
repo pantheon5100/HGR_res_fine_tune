@@ -115,7 +115,16 @@ ps: 初步实验未计算预测矩阵，后续实验补充。
 
 Result Error Matrix
 
-a. 
+b. ![1558348763245](I:\Zak_work\State of art\res_fine_tune\plan.assets\1558348763245.png)
+
+![1558348994085](I:\Zak_work\State of art\res_fine_tune\plan.assets\1558348994085.png)
+
+![1558358018919](I:\Zak_work\State of art\res_fine_tune\plan.assets\1558358018919.png)
+
+加大了学习率变化步长
+
++ 1.从zk测试集准确率来看模型收敛于极小值点。
++ 2.zk测试集与ylt测试集随着迭代增加，准确率逐渐接近，推测增大epoch会有一定的效果。
 
 # 2. 无监督领域自适应
 

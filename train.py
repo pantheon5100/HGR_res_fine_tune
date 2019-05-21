@@ -12,8 +12,8 @@ from data import get_data_loader
 
 DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 torch.backends.cudnn.benchmark = True
-BATCH_SIZE = 50
-N_EPOCH = 100
+BATCH_SIZE = 100
+N_EPOCH = 200
 LOG_INTERVAL = 20
 LEARNING_RATE = 1e-1
 DECAY = LEARNING_RATE / N_EPOCH
@@ -82,12 +82,14 @@ def test(model, dataloader, epoch, data_df):
     return accu, (each_data_number - erro_sum) / each_data_number
 
 
-def train(model, optimizer, **data_loader):
+def train(model, **data_loader):
     '''
 
     :param data_loader: a dict like this {'dataloader_src':loader_1, 'dataloader_tar':loader_2,
                                             'dataloader_src_test':loader_3, 'dataloader_tar_test':loader_4}
     '''
+
+    global LEARNING_RATE
     time_stamp = time.strftime('ex-%H%M', time.localtime(time.time()))
     env_name = 'res_fine_tune_res'+time_stamp
     vis = visdom.Visdom(env=env_name)
@@ -101,22 +103,37 @@ def train(model, optimizer, **data_loader):
              '1. Every 5 epoch output. '
              '2. Add Learning Rate line. '
              '3. Regain step to 20'
-             '4. FLR/CLR = 0.001')
+             '4. FLR/CLR = 0.001'
+             '======================='
+             '520yyh '
+             '1. Correct LR change. '
+             '=======================521 '
+             '1. Add yh jc data '
+             '2. Add model save ')
     vis.text('Hyper-parameters:'
-             '1. Learning rate decay multiple policy with step 20  LearningRate * (1 - epoch / N_epoch) ** power. '
-             '2. Epoch 100. ' 
-             '3. Feature LR / Classifier LR = 0.001')
+             '1. Learning rate decay multiple policy with step 25  LearningRate * (1 - epoch / N_epoch) ** power. '
+             '2. Epoch 200. ' 
+             '3. Feature LR / Classifier LR = 0.01'
+             '4. BATCH_SIZE = 100')
     len_dataset = data_loader.get('dataloader_src').dataset.tensors[0].size()[0]
 
     for epoch in range(1, N_EPOCH + 1):
         # acc_src = test(model, data_loader.get('dataloader_tar'), epoch, data_loader.get('datafram_2'))
 
+
         model.train()
         loss_class = torch.nn.CrossEntropyLoss()
         train_loss = []
-        lr = poly_lr_scheduler(optimizer, LEARNING_RATE, epoch, lr_decay_iter=1,
-                          max_iter=N_EPOCH, power=1.5)
-        vis.line(X=[epoch], Y=[lr], win='Learning rate', opts={'title': 'Learning rate'}, update='append')
+        # LEARNING_RATE = poly_lr_scheduler(epoch, lr_decay_iter=1, max_iter=N_EPOCH, power=1.5)
+        if (epoch + 1) % 25 == 0:
+            LEARNING_RATE = LEARNING_RATE * (1 - epoch / N_EPOCH) ** 1.5
+            print('Learning Rate :', LEARNING_RATE)
+
+        optimizer = torch.optim.SGD([
+            {'params': model.feature.parameters(), 'lr': LEARNING_RATE / 100},
+        ], lr=LEARNING_RATE, momentum=0.9, weight_decay=DECAY)
+
+        vis.line(X=[epoch], Y=[LEARNING_RATE], win='Learning rate', opts={'title': 'Learning rate'}, update='append')
 
 
         for times, data_src_iter in enumerate(data_loader.get('dataloader_src')):
@@ -148,15 +165,20 @@ def train(model, optimizer, **data_loader):
 
             acc_src, acc_m1 = test(model, data_loader.get('dataloader_tar'), epoch, data_loader.get('datafram_2'))
             acc_ylt, acc_m2 = test(model, data_loader.get('dataloader_ylt'), epoch, data_loader.get('datafram_3'))
+            acc_yh, acc_m3 = test(model, data_loader.get('dataloader_yh'), epoch, data_loader.get('datafram_4'))
+            acc_jc, acc_m4 = test(model, data_loader.get('dataloader_jc'), epoch, data_loader.get('datafram_5'))
 
 
             vis.line(X=[epoch], Y=[acc_src], win='acc src', opts={'title': 'acc src'}, update='append')
             vis.line(X=[epoch], Y=[acc_ylt], win='acc ylt', opts={'title': 'acc ylt'}, update='append')
+            vis.line(X=[epoch], Y=[acc_yh], win='acc yh', opts={'title': 'acc yh'}, update='append')
+            vis.line(X=[epoch], Y=[acc_jc], win='acc jc', opts={'title': 'acc jc'}, update='append')
+
+
+            # torch.save(model.module.state_dict(), 'run//epoch_{}.pth'.format(epoch))
         vis.line(X=[epoch], Y=[train_loss], win='train_loss', opts={'title': 'train_loss'}, update='append')
         # vis.line(X=[epoch], Y=[acc_m1.reshape(6, 1)], win='acc gesture', opts={'title': 'acc gesture'}, update='append')
         # vis.line(X=[epoch], Y=[acc_m2.reshape(6, 1)], win='acc ylt gesture', opts={'title': 'acc ylt gesture'}, update='append')
-
-
 
     try:
         vis.save(envs=[env_name])
@@ -193,24 +215,6 @@ def set_grad(model, grad=True):
         param.requires_grad = grad
 
 
-def poly_lr_scheduler(optimizer, init_lr, iter, lr_decay_iter=1,
-                      max_iter=300, power=0.9):
-    """Polynomial decay of learning rate
-		:param init_lr is base learning rate
-		:param iter is a current iteration
-		:param lr_decay_iter how frequently decay occurs, default is 1
-		:param max_iter is number of maximum iterations
-		:param power is a polymomial power
-
-	"""
-    if (iter+1) % 25  == 0:
-        lr = init_lr * (1 - iter / max_iter) ** power
-        optimizer.param_groups[0]['lr'] = lr
-        print('Learning Rate :', lr)
-    else:
-        lr = init_lr
-    return lr
-
 if __name__ == '__main__':
     domain_1_list = [r'I:\Zak_work\State of art\time_freq\time_freq_split_12\RDM\zgy']
 
@@ -219,16 +223,28 @@ if __name__ == '__main__':
 
     domain_3_list = [r'I:\Zak_work\State of art\lt']
 
+    domain_4_list = [r'I:\Zak_work\State of art\yh']
+
+    domain_5_list = [r'I:\Zak_work\State of art\jc']
+
     setup_seed(20)
     loader_src_train, loader_src_test, dfs1 = get_data_loader(BATCH_SIZE, *domain_1_list)
     loader_tar_train, _, dfs2 = get_data_loader(BATCH_SIZE, *domain_2_list)
     loader_ylt_train, _, dfs3 = get_data_loader(BATCH_SIZE, *domain_3_list)
+    loader_yh_train, _, dfs4 = get_data_loader(BATCH_SIZE, *domain_4_list)
+    loader_jc_train, _, dfs5 = get_data_loader(BATCH_SIZE, *domain_5_list)
 
     data_loader = {'dataloader_src': loader_src_train, 'dataloader_tar': loader_tar_train,
                    'dataloader_src_test': loader_src_test, 'dataloader_ylt':loader_ylt_train,
-                   'datafram_2':dfs2, 'datafram_3':dfs3}
+                   'datafram_2':dfs2, 'datafram_3':dfs3, 'datafram_4':dfs4, 'datafram_5':dfs5,
+                   'dataloader_yh':loader_yh_train, 'dataloader_jc':loader_jc_train,}
+
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
     model = ResFT().to(DEVICE).double()
+
+    model = torch.nn.DataParallel(model).module.cuda()
+
     model.apply(weight_init)
     for param in model.feature.parameters():
         param.requires_grad = True
@@ -236,7 +252,5 @@ if __name__ == '__main__':
 
     # optimizer = torch.optim.Adam(model_dann.parameters(), lr=LEARNING_RATE)
     # optimizer = torch.optim.RMSprop(model.parameters(), LEARNING_RATE)
-    optimizer = torch.optim.SGD([
-            {'params': model.feature.parameters(), 'lr': LEARNING_RATE / 1000},
-        ], lr=LEARNING_RATE, momentum=0.9, weight_decay=DECAY)
-    train(model, optimizer, **data_loader)
+
+    train(model, **data_loader)
