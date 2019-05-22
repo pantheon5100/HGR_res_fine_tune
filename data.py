@@ -85,10 +85,11 @@ def one_hot(y_, category=None):
     return category.get(y_, 'the key not exist')
 
 
-def get_data_loader(batch_size, *path_dir_list, gama=0, shuffle=True, num_workers=0, infout=True):
+def get_data_loader(batch_size, *path_dir_list, gama=0, shuffle=True, num_workers=4, infout=True):
     '''
     Train dataset and test dataset must more than one batch size!
 
+    :param infout: whether to output load information
     :param batch_size:
     :param path_dir_list:
     :param gama: The ratio of the total number of test to the data set

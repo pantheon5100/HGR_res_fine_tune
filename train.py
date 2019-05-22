@@ -8,12 +8,12 @@ import visdom
 import pandas as pd
 
 from model import ResFT
-from data import get_data_loader
+from fierce_data import get_data_loader
 
 DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 torch.backends.cudnn.benchmark = True
 BATCH_SIZE = 100
-N_EPOCH = 200
+N_EPOCH = 100
 LOG_INTERVAL = 20
 LEARNING_RATE = 1e-1
 DECAY = LEARNING_RATE / N_EPOCH
@@ -22,10 +22,8 @@ result = []
 
 
 # Folder Create
-def create_root(model):
-    # time_stamp = time.strftime('%Y%m%d-%H%M', time.localtime(time.time()))
-    time_stamp = 888
-    model_root = 'I:\\Zak_work\\torch_model_save\\' + str(time_stamp)
+def create_root(direct):
+    model_root = 'I:\\Zak_work\\torch_save\\' + str(direct)
 
     try:
         os.mkdir(model_root)
@@ -48,7 +46,8 @@ def show_data(vis, data, win='heatmap_', sleep_time=1):
         time.sleep(sleep_time)
 
 
-def test(model, dataloader, epoch, data_df):
+def test(model, dataloader, epoch):
+    Test_data, Test_label, data_df = dataloader
     each_data_number = data_df.loc['SUM'].values
     model.eval()
     n_correct = 0
@@ -56,15 +55,14 @@ def test(model, dataloader, epoch, data_df):
     predict_matrix = np.zeros((6, 6))
 
     with torch.no_grad():
-        for _, (t_img, t_label) in enumerate(dataloader):
-            t_img, t_label = t_img.to(DEVICE), t_label.to(DEVICE)
-            class_output, _, _ = model(t_img)
-            pred = torch.max(class_output.data, 1)
-            label = torch.max(t_label, 1)
-            n_correct += (pred[1] == label[1]).sum().item()
-            for result, answer in zip(pred[1], label[1]):
-                if result != answer:
-                    predict_matrix[answer][result] += 1
+        t_img, t_label = torch.Tensor(Test_data).to(DEVICE), torch.Tensor(Test_label).to(DEVICE)
+        class_output, _, _ = model(t_img)
+        pred = torch.max(class_output.data, 1)
+        label = torch.max(t_label, 1)
+        n_correct += (pred[1] == label[1]).sum().item()
+        for result, answer in zip(pred[1], label[1]):
+            if result != answer:
+                predict_matrix[answer][result] += 1
 
     df = pd.DataFrame(predict_matrix, index=['pd', 'lf', 'hand_expend',
                                     'away_radar', 'forward_radar', 'hand_hold'],
@@ -90,7 +88,8 @@ def train(model, **data_loader):
     '''
 
     global LEARNING_RATE
-    time_stamp = time.strftime('ex-%H%M', time.localtime(time.time()))
+    time_stamp = time.strftime('ex-%m%d%H%M', time.localtime(time.time()))
+    model_save_dir = create_root(time_stamp)
     env_name = 'res_fine_tune_res'+time_stamp
     vis = visdom.Visdom(env=env_name)
 
@@ -105,40 +104,42 @@ def train(model, **data_loader):
              '3. Regain step to 20'
              '4. FLR/CLR = 0.001'
              '======================='
-             '520yyh '
+             '520'
              '1. Correct LR change. '
              '=======================521 '
              '1. Add yh jc data '
-             '2. Add model save ')
+             '2. Add model save '
+             '=======================522'
+             '1. Add model save '
+             '2. FLR/CLR = 0.1')
     vis.text('Hyper-parameters:'
              '1. Learning rate decay multiple policy with step 25  LearningRate * (1 - epoch / N_epoch) ** power. '
-             '2. Epoch 200. ' 
-             '3. Feature LR / Classifier LR = 0.01'
-             '4. BATCH_SIZE = 100')
-    len_dataset = data_loader.get('dataloader_src').dataset.tensors[0].size()[0]
+             '2. Epoch 100. ' 
+             '3. Feature LR / Classifier LR = 0.1 '
+             '4. BATCH_SIZE = 100 '
+             '5. NUMBER_WORKERS = 4 ')
+
+    Train_data, Train_label, _ = data_loader.get('dataloader_zgy')
+    len_per_epoch = int(Train_data.shape[0] / BATCH_SIZE)
 
     for epoch in range(1, N_EPOCH + 1):
         # acc_src = test(model, data_loader.get('dataloader_tar'), epoch, data_loader.get('datafram_2'))
-
-
         model.train()
         loss_class = torch.nn.CrossEntropyLoss()
         train_loss = []
-        # LEARNING_RATE = poly_lr_scheduler(epoch, lr_decay_iter=1, max_iter=N_EPOCH, power=1.5)
+
         if (epoch + 1) % 25 == 0:
-            LEARNING_RATE = LEARNING_RATE * (1 - epoch / N_EPOCH) ** 1.5
+            LEARNING_RATE = LEARNING_RATE * (1 - epoch / N_EPOCH) ** 0.9
             print('Learning Rate :', LEARNING_RATE)
 
-        optimizer = torch.optim.SGD([
-            {'params': model.feature.parameters(), 'lr': LEARNING_RATE / 100},
-        ], lr=LEARNING_RATE, momentum=0.9, weight_decay=DECAY)
+        optimizer = torch.optim.SGD([{'params': model.feature.parameters(), 'lr': LEARNING_RATE / 10},],
+                                    lr=LEARNING_RATE, momentum=0.9, weight_decay=DECAY)
 
         vis.line(X=[epoch], Y=[LEARNING_RATE], win='Learning rate', opts={'title': 'Learning rate'}, update='append')
 
-
-        for times, data_src_iter in enumerate(data_loader.get('dataloader_src')):
+        for times in range(len_per_epoch):
             # Training model using source data
-            s_img, s_label = data_src_iter[0].to(DEVICE), data_src_iter[1].to(DEVICE)
+            s_img, s_label = torch.Tensor(Train_data[times*BATCH_SIZE:(times+1)*BATCH_SIZE]).double().to(DEVICE), torch.Tensor(Train_label[times*BATCH_SIZE:(times+1)*BATCH_SIZE]).double().to(DEVICE)
 
             class_output = model(s_img)
             err = loss_class(class_output, torch.max(s_label, 1)[1])
@@ -152,30 +153,28 @@ def train(model, **data_loader):
                 n_correct = (pred[1] == torch.max(s_label, 1)[1]).sum().item()
                 batch_acc = (n_correct / BATCH_SIZE) * 100
                 print('Train Epoch: {} [{}/{} ]\tLoss: {:.6f}\tBatch Acc: {}'.format(
-                    epoch, times * BATCH_SIZE, len_dataset, err.item(),
+                    epoch, times * BATCH_SIZE, Train_label.shape[0], err.item(),
                     batch_acc))
-                vis.line(X=[epoch + times / len_dataset], Y=[err.item()],
+                vis.line(X=[epoch + times / Train_label.shape[0]], Y=[err.item()],
                          win='batchloss', opts={'title': 'batch loss'}, update='append')
-                vis.line(X=[epoch + times / len_dataset], Y=[batch_acc],
+                vis.line(X=[epoch + times / Train_label.shape[0]], Y=[batch_acc],
                          win='batchacc', opts={'title': 'batch acc'}, update='append')
 
         train_loss = np.mean(train_loss)
 
         if epoch % 5 == 0 :
 
-            acc_src, acc_m1 = test(model, data_loader.get('dataloader_tar'), epoch, data_loader.get('datafram_2'))
-            acc_ylt, acc_m2 = test(model, data_loader.get('dataloader_ylt'), epoch, data_loader.get('datafram_3'))
-            acc_yh, acc_m3 = test(model, data_loader.get('dataloader_yh'), epoch, data_loader.get('datafram_4'))
-            acc_jc, acc_m4 = test(model, data_loader.get('dataloader_jc'), epoch, data_loader.get('datafram_5'))
-
+            acc_src, acc_m1 = test(model, data_loader.get('dataloader_zk'), epoch)
+            acc_ylt, acc_m2 = test(model, data_loader.get('dataloader_lt'), epoch)
+            acc_yh, acc_m3 = test(model, data_loader.get('dataloader_yh'), epoch)
+            acc_jc, acc_m4 = test(model, data_loader.get('dataloader_jc'), epoch)
 
             vis.line(X=[epoch], Y=[acc_src], win='acc src', opts={'title': 'acc src'}, update='append')
             vis.line(X=[epoch], Y=[acc_ylt], win='acc ylt', opts={'title': 'acc ylt'}, update='append')
             vis.line(X=[epoch], Y=[acc_yh], win='acc yh', opts={'title': 'acc yh'}, update='append')
             vis.line(X=[epoch], Y=[acc_jc], win='acc jc', opts={'title': 'acc jc'}, update='append')
 
-
-            # torch.save(model.module.state_dict(), 'run//epoch_{}.pth'.format(epoch))
+            torch.save(model.state_dict(), model_save_dir + '//epoch_{}.pth'.format(epoch))
         vis.line(X=[epoch], Y=[train_loss], win='train_loss', opts={'title': 'train_loss'}, update='append')
         # vis.line(X=[epoch], Y=[acc_m1.reshape(6, 1)], win='acc gesture', opts={'title': 'acc gesture'}, update='append')
         # vis.line(X=[epoch], Y=[acc_m2.reshape(6, 1)], win='acc ylt gesture', opts={'title': 'acc ylt gesture'}, update='append')
@@ -189,10 +188,10 @@ def train(model, **data_loader):
 # 自定义权值初始化方式
 def weight_init(m):
     if isinstance(m, nn.Linear):
-        nn.init.xavier_normal_(m.weight)
+        nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
         nn.init.constant_(m.bias, 0)
 
-    elif isinstance(m, nn.Conv3d):
+    elif isinstance(m, nn.Conv2d):
         nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
 
 
@@ -228,16 +227,17 @@ if __name__ == '__main__':
     domain_5_list = [r'I:\Zak_work\State of art\jc']
 
     setup_seed(20)
-    loader_src_train, loader_src_test, dfs1 = get_data_loader(BATCH_SIZE, *domain_1_list)
-    loader_tar_train, _, dfs2 = get_data_loader(BATCH_SIZE, *domain_2_list)
-    loader_ylt_train, _, dfs3 = get_data_loader(BATCH_SIZE, *domain_3_list)
-    loader_yh_train, _, dfs4 = get_data_loader(BATCH_SIZE, *domain_4_list)
-    loader_jc_train, _, dfs5 = get_data_loader(BATCH_SIZE, *domain_5_list)
+    data_array_zgy, label_array_zgy, dfs1 = get_data_loader(BATCH_SIZE, *domain_1_list)
+    data_array_zk, label_array_zk, dfs2 = get_data_loader(BATCH_SIZE, *domain_2_list)
+    data_array_lt, label_array_lt, dfs3 = get_data_loader(BATCH_SIZE, *domain_3_list)
+    data_array_yh, label_array_yh, dfs4 = get_data_loader(BATCH_SIZE, *domain_4_list)
+    data_array_jc, label_array_jc, dfs5 = get_data_loader(BATCH_SIZE, *domain_5_list)
 
-    data_loader = {'dataloader_src': loader_src_train, 'dataloader_tar': loader_tar_train,
-                   'dataloader_src_test': loader_src_test, 'dataloader_ylt':loader_ylt_train,
-                   'datafram_2':dfs2, 'datafram_3':dfs3, 'datafram_4':dfs4, 'datafram_5':dfs5,
-                   'dataloader_yh':loader_yh_train, 'dataloader_jc':loader_jc_train,}
+    data_loader = {'dataloader_zgy': [data_array_zgy, label_array_zgy, dfs1],
+                   'dataloader_zk': [data_array_zk, label_array_zk, dfs2],
+                   'dataloader_lt': [data_array_lt, label_array_lt, dfs3],
+                   'dataloader_yh': [data_array_yh, label_array_yh, dfs4],
+                   'dataloader_jc': [data_array_jc, label_array_jc, dfs5]}
 
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
