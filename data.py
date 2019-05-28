@@ -7,7 +7,6 @@ import torch
 import torch.utils.data
 
 
-
 def path_to_label(path, category=None):
     if category is None:
         category = {'五指握': 'hand_hold',
@@ -27,7 +26,7 @@ def path_to_label(path, category=None):
     return sort
 
 
-def load_data(data_path, category=None, path_cat = None):
+def load_data(data_path, category=None, path_cat = None, read_mat=True):
     '''
     :param save_path: save .bin dir
     :type data_path: object
@@ -54,13 +53,19 @@ def load_data(data_path, category=None, path_cat = None):
                 file_information = file_name.split('.')[0]  # '朝着雷达 (2)2'
                 frame = file_information[-1]
                 data_sorts_col[category_col.index(path_to_label(file, path_cat))] += 1
-                data_structure = sio.loadmat(file)
-                structure_name = 'P' + frame
-                file_out.append(file)
-                data_array = data_structure[structure_name]
                 training_label.append(one_hot(path_to_label(file, path_cat), category))
-                #                 training_data.append(np.array(data_array))
-                training_data.append(np.moveaxis(np.array(data_array), -1, 0))
+
+                if read_mat:
+                    data_structure = sio.loadmat(file)
+                    structure_name = 'P' + frame
+                    file_out.append(file)
+                    data_array = data_structure[structure_name]
+                    # training_data.append(np.array(data_array))
+                    training_data.append(np.moveaxis(np.array(data_array), -1, 0))
+                elif read_mat == False:
+
+                    pass
+
     df.loc[data_path.split('\\')[-1]] = data_sorts_col
 
     training_data = np.uint8(np.array(training_data))
@@ -85,10 +90,14 @@ def one_hot(y_, category=None):
     return category.get(y_, 'the key not exist')
 
 
-def get_data_loader(batch_size, *path_dir_list, gama=0, shuffle=True, num_workers=0, infout=True):
+def get_data_loader(batch_size, *path_dir_list, gama=0, alpha=0,
+                    shuffle=True, num_workers=0, infout=True,
+                    read_mat=True, loader_array=False, loader_TT_array=False):
     '''
     Train dataset and test dataset must more than one batch size!
 
+    :param loader_array: False return dataloader, True return numpy array
+    :param infout: whether to output load information
     :param batch_size:
     :param path_dir_list:
     :param gama: The ratio of the total number of test to the data set
@@ -107,7 +116,7 @@ def get_data_loader(batch_size, *path_dir_list, gama=0, shuffle=True, num_worker
     label_array = []
     dfs = []
     for path in path_dir_list:
-        x_data, y_data, file_list, df = load_data(path, path_cat=category)
+        x_data, y_data, file_list, df = load_data(path, path_cat=category, read_mat=read_mat)
         dfs.append(df)
         data_array.extend(x_data)
         label_array.extend(y_data)
@@ -135,49 +144,109 @@ def get_data_loader(batch_size, *path_dir_list, gama=0, shuffle=True, num_worker
         data_array = data_array[:-drop_num]
         label_array = label_array[:-drop_num]
 
-    n_test = int(data_array.shape[0] / batch_size * gama) *batch_size
-    if n_test == 0 and gama != 0:
-        n_test = batch_size
-    elif data_array.shape[0] - n_test == 0:
-        n_test = n_test - batch_size
+    if loader_array:
+        return data_array, label_array, dfs
 
-    test_data = data_array[:n_test]
-    test_label = label_array[:n_test]
+    elif loader_TT_array:
 
-    data_array = data_array[n_test:]
-    label_array = label_array[n_test:]
+        test_data = []
+        test_label = []
+        train_data = []
+        train_label = []
+        for pro in range(6):
+            label = [0, 0, 0, 0, 0, 0]
+            label[pro] = 1
+            index = np.sum(label_array == label, 1) == 6
+            temp_array_data = data_array[index]
+            temp_array_label = label_array[index]
 
-    data_array_torch = torch.from_numpy(data_array).double()
-    label_array_torch = torch.from_numpy(label_array).double()
-    data_data_set = torch.utils.data.TensorDataset(data_array_torch, label_array_torch)
-    try:
-        data_loader_train = torch.utils.data.DataLoader(
-            dataset=data_data_set,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            num_workers=num_workers
-        )
-    except ValueError:
-        print('Error : Batch size is too big to make a whole data set!!')
-        exit()
+            test_data.extend(temp_array_data[alpha:])
+            test_label.extend(temp_array_label[alpha:])
+            train_data.extend(temp_array_data[:alpha])
+            train_label.extend(temp_array_label[:alpha])
 
-    data_array_torch = torch.from_numpy(test_data).double()
-    label_array_torch = torch.from_numpy(test_label).double()
-    data_data_set = torch.utils.data.TensorDataset(data_array_torch, label_array_torch)
+        test_data = np.array(test_data)
+        test_label = np.array(test_label)
 
-    if gama == 0:
-        data_loader_test = None
-    else:
+        train_data = np.array(train_data)
+        train_label = np.array(train_label)
+        permutation = np.random.permutation(train_data.shape[0])
+        train_data = train_data[permutation, :, :, :]
+        train_label = train_label[permutation, :]
+
+        data_array_torch = torch.from_numpy(train_data).double()
+        label_array_torch = torch.from_numpy(train_label).double()
+        data_data_set = torch.utils.data.TensorDataset(data_array_torch, label_array_torch)
+        try:
+            data_loader_train = torch.utils.data.DataLoader(
+                dataset=data_data_set,
+                batch_size=batch_size,
+                shuffle=shuffle,
+                num_workers=num_workers
+            )
+        except ValueError:
+            print('Error : Batch size is too big to make a whole data set!!')
+            exit()
+
+        data_array_torch = torch.from_numpy(test_data).double()
+        label_array_torch = torch.from_numpy(test_label).double()
+        data_data_set = torch.utils.data.TensorDataset(data_array_torch, label_array_torch)
+
         data_loader_test = torch.utils.data.DataLoader(
             dataset=data_data_set,
             batch_size=batch_size,
             shuffle=shuffle,
             num_workers=num_workers
         )
-    if infout:
-        print('+ + + Total load data train data shape:{}, test data shape{}. + + +\n'.format(data_array.shape, test_data.shape))
+        if infout:
+            print('+ + + Total load data train data shape:{}, test data shape{}. + + +\n'.format(train_data.shape,
+                                                                                                 test_data.shape))
+        return data_loader_train, data_loader_test, dfs
 
-    return data_loader_train, data_loader_test, dfs
+    else:
+        n_test = int(data_array.shape[0] / batch_size * gama) *batch_size
+        if n_test == 0 and gama != 0:
+            n_test = batch_size
+        elif data_array.shape[0] - n_test == 0:
+            n_test = n_test - batch_size
+
+        test_data = data_array[:n_test]
+        test_label = label_array[:n_test]
+
+        data_array = data_array[n_test:]
+        label_array = label_array[n_test:]
+
+        data_array_torch = torch.from_numpy(data_array).double()
+        label_array_torch = torch.from_numpy(label_array).double()
+        data_data_set = torch.utils.data.TensorDataset(data_array_torch, label_array_torch)
+        try:
+            data_loader_train = torch.utils.data.DataLoader(
+                dataset=data_data_set,
+                batch_size=batch_size,
+                shuffle=shuffle,
+                num_workers=num_workers
+            )
+        except ValueError:
+            print('Error : Batch size is too big to make a whole data set!!')
+            exit()
+
+        data_array_torch = torch.from_numpy(test_data).double()
+        label_array_torch = torch.from_numpy(test_label).double()
+        data_data_set = torch.utils.data.TensorDataset(data_array_torch, label_array_torch)
+
+        if gama == 0:
+            data_loader_test = None
+        else:
+            data_loader_test = torch.utils.data.DataLoader(
+                dataset=data_data_set,
+                batch_size=batch_size,
+                shuffle=shuffle,
+                num_workers=num_workers
+            )
+        if infout:
+            print('+ + + Total load data train data shape:{}, test data shape{}. + + +\n'.format(data_array.shape, test_data.shape))
+
+        return data_loader_train, data_loader_test, dfs
 
 
 if __name__ == '__main__':
